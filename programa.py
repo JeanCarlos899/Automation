@@ -21,8 +21,10 @@ class ConfiguracoesUsuario:
         "tempo_espera": "0.5",
         "confirmar_venda": True,
         "usar_clique_pdv": True,
+        "usar_clique_fechar": True,
         "quantidade_max_item": "200",
         "quantidade_max_por_vez": "99",
+        "vender_unidade_unica": False,
         "x_codigo": None,
         "y_codigo": None,
         "x_dinheiro": None,
@@ -122,7 +124,7 @@ class ConfiguracoesUsuario:
 class AutoSoftcom:
     def __init__(self, path, tempo_espera_inicial, tempo_espera, valor_max_venda, x_codigo, y_codigo,
                  x_dinheiro, y_dinheiro, x_finalizar, y_finalizar, x_fechar, y_fechar, porcentagem_estoque, estoque_minimo,
-                 margem_venda, confirmar_venda, usar_clique_pdv=True, usuario=None, quantidade_max_item=200, quantidade_max_por_vez=99):
+                 margem_venda, confirmar_venda, usar_clique_pdv=True, usuario=None, quantidade_max_item=200, quantidade_max_por_vez=99, vender_unidade_unica=False, usar_clique_fechar=True):
         time.sleep(float(tempo_espera_inicial))
 
         self.tempo_espera = float(tempo_espera)
@@ -140,9 +142,11 @@ class AutoSoftcom:
         self.margem_venda = float(margem_venda) / 100
         self.confirmar_venda = confirmar_venda
         self.usar_clique_pdv = usar_clique_pdv
+        self.usar_clique_fechar = usar_clique_fechar
         self.usuario = usuario
         self.quantidade_max_item = int(quantidade_max_item)
         self.quantidade_max_por_vez = int(quantidade_max_por_vez)
+        self.vender_unidade_unica = vender_unidade_unica
         self.codigos_exclusao = set()
 
         if usuario:
@@ -201,8 +205,13 @@ class AutoSoftcom:
     def filtrar_produtos_disponiveis(self):
         estoque_disponivel = self.df['Estoque'] - self.df['Quantidade vendida']
         self.df['Estoque disponivel'] = estoque_disponivel
-        mask = (estoque_disponivel > self.estoque_minimo) & (
-            self.df['Quantidade vendida'] == 0)
+
+        if self.vender_unidade_unica:
+            mask = ((estoque_disponivel > self.estoque_minimo) | (estoque_disponivel == 1)) & (
+                self.df['Quantidade vendida'] == 0)
+        else:
+            mask = (estoque_disponivel > self.estoque_minimo) & (
+                self.df['Quantidade vendida'] == 0)
 
         if self.codigos_exclusao:
             produtos_na_exclusao = self.df[self.df['Codigo'].astype(
@@ -224,12 +233,22 @@ class AutoSoftcom:
             raise ValueError("Não há produtos disponíveis para venda")
 
     def calcular_quantidade_venda(self, estoque_disponivel, codigo_produto):
+        print(f"\n--- Produto {codigo_produto} ---")
+        print(f"Estoque disponível: {estoque_disponivel} unidades")
+
+        if estoque_disponivel == 1:
+            if self.vender_unidade_unica:
+                print(f"✅ Produto com 1 unidade: vendendo a unidade única")
+                return 1
+            else:
+                print(
+                    f"⚠️ Produto com 1 unidade: ignorado (opção 'vender unidade única' desativada)")
+                return 0
+
         porcentagem_pct = self.porcentagem_estoque * 100
         quantidade_exata = estoque_disponivel * self.porcentagem_estoque
         quantidade_max = int(quantidade_exata)
 
-        print(f"\n--- Produto {codigo_produto} ---")
-        print(f"Estoque disponível: {estoque_disponivel} unidades")
         print(f"Porcentagem configurada: {porcentagem_pct:.1f}%")
         print(
             f"Quantidade calculada pela porcentagem: {quantidade_exata:.2f} → {quantidade_max} unidades")
@@ -284,9 +303,12 @@ class AutoSoftcom:
             codigo_produto = produto['Codigo']
 
             if estoque_disponivel <= self.estoque_minimo:
-                print(
-                    f"\n⚠️ Produto {codigo_produto}: Estoque ({estoque_disponivel}) <= estoque mínimo ({self.estoque_minimo}), ignorado")
-                continue
+                if estoque_disponivel == 1 and self.vender_unidade_unica:
+                    pass
+                else:
+                    print(
+                        f"\n⚠️ Produto {codigo_produto}: Estoque ({estoque_disponivel}) <= estoque mínimo ({self.estoque_minimo}), ignorado")
+                    continue
 
             quantidade = self.calcular_quantidade_venda(
                 estoque_disponivel, codigo_produto)
@@ -419,8 +441,9 @@ class AutoSoftcom:
             if resposta != 'Yes':
                 return 'parar'
 
-        p.click(self.x_fechar, self.y_fechar)
-        time.sleep(2)
+        if self.usar_clique_fechar:
+            p.click(self.x_fechar, self.y_fechar)
+            time.sleep(2)
 
         return valor_venda_atual
 
@@ -557,10 +580,14 @@ class WindowAuto:
             janela['-CONFIRMAR-'].update(config.get('confirmar_venda', True))
             janela['-USAR_CLIQUE_PDV-'].update(
                 config.get('usar_clique_pdv', True))
+            janela['-USAR_CLIQUE_FECHAR-'].update(
+                config.get('usar_clique_fechar', True))
             janela['-QTD_MAX_ITEM-'].update(
                 config.get('quantidade_max_item', '200'))
             janela['-QTD_MAX_POR_VEZ-'].update(
                 config.get('quantidade_max_por_vez', '99'))
+            janela['-VENDER_UNIDADE_UNICA-'].update(
+                config.get('vender_unidade_unica', False))
 
             x_codigo = config.get('x_codigo')
             y_codigo = config.get('y_codigo')
@@ -650,8 +677,10 @@ class WindowAuto:
                 'tempo_espera': values.get('-TEMPO-', '0.5'),
                 'confirmar_venda': values.get('-CONFIRMAR-', True),
                 'usar_clique_pdv': values.get('-USAR_CLIQUE_PDV-', True),
+                'usar_clique_fechar': values.get('-USAR_CLIQUE_FECHAR-', True),
                 'quantidade_max_item': values.get('-QTD_MAX_ITEM-', '200'),
                 'quantidade_max_por_vez': values.get('-QTD_MAX_POR_VEZ-', '99'),
+                'vender_unidade_unica': values.get('-VENDER_UNIDADE_UNICA-', False),
                 'x_codigo': self.x_codigo,
                 'y_codigo': self.y_codigo,
                 'x_dinheiro': self.x_dinheiro,
@@ -718,7 +747,10 @@ class WindowAuto:
                                         tooltip="Quantidade máxima para colocar de uma só vez",
                                         enable_events=True)],
                           [sg.Checkbox("Confirmar após cada venda",
-                                       key="-CONFIRMAR-", default=True, enable_events=True)]
+                                       key="-CONFIRMAR-", default=True, enable_events=True)],
+                          [sg.Checkbox("Vender produtos com 1 unidade",
+                                       key="-VENDER_UNIDADE_UNICA-", default=False, enable_events=True,
+                                       tooltip="Quando ativado, vende produtos que têm apenas 1 unidade em estoque")]
                       ], expand_x=True
                       )],
             [sg.Frame("Tempos",
@@ -751,7 +783,9 @@ class WindowAuto:
             [sg.Frame("Calibração de Mouse",
                       [
                           [sg.Checkbox(
-                              "Usar clique do PDV", key="-USAR_CLIQUE_PDV-", default=True, enable_events=True)],
+                              "Usar clique do PDV", key="-USAR_CLIQUE_PDV-", default=True, enable_events=True),
+                           sg.Checkbox(
+                              "Usar clique para fechar", key="-USAR_CLIQUE_FECHAR-", default=True, enable_events=True)],
                           [sg.Text("Clique do código (PDV):", size=(22, 1)),
                            sg.Button(
                                "Calibrar", key="-CALIBRAR_CODIGO-", size=(10, 1)),
@@ -880,7 +914,11 @@ if __name__ == "__main__":
                     values['-LISTA_EXCLUSAO-'][0])
 
         elif event == '-CALIBRAR_CODIGO-':
-            usuario = (values.get('-USUARIO') or "").strip()
+            usuario = (values.get('-USUARIO-') or "").strip()
+            if not usuario:
+                sg.popup("Por favor, selecione ou crie um usuário/comércio primeiro.",
+                         title="Erro", keep_on_top=True)
+                continue
             sg.popup("Mova o mouse para a posição do código em 5 segundos...",
                      title="Calibração", keep_on_top=True)
             time.sleep(5)
@@ -889,11 +927,15 @@ if __name__ == "__main__":
                 f"X: {window.x_codigo}, Y: {window.y_codigo}")
             print(
                 f"Posição do código calibrada: ({window.x_codigo}, {window.y_codigo})")
-            if usuario:
-                window.salvar_config_usuario(janela, usuario, values)
+            window.salvar_config_usuario(janela, usuario, values)
+            print(f"✅ Configuração salva para o usuário '{usuario}'")
 
         elif event == '-CALIBRAR_DINHEIRO-':
-            usuario = (values.get('-USUARIO') or "").strip()
+            usuario = (values.get('-USUARIO-') or "").strip()
+            if not usuario:
+                sg.popup("Por favor, selecione ou crie um usuário/comércio primeiro.",
+                         title="Erro", keep_on_top=True)
+                continue
             sg.popup("Mova o mouse para a posição do dinheiro em 5 segundos...",
                      title="Calibração", keep_on_top=True)
             time.sleep(5)
@@ -902,11 +944,15 @@ if __name__ == "__main__":
                 f"X: {window.x_dinheiro}, Y: {window.y_dinheiro}")
             print(
                 f"Posição do dinheiro calibrada: ({window.x_dinheiro}, {window.y_dinheiro})")
-            if usuario:
-                window.salvar_config_usuario(janela, usuario, values)
+            window.salvar_config_usuario(janela, usuario, values)
+            print(f"✅ Configuração salva para o usuário '{usuario}'")
 
         elif event == '-CALIBRAR_FINALIZAR-':
-            usuario = (values.get('-USUARIO') or "").strip()
+            usuario = (values.get('-USUARIO-') or "").strip()
+            if not usuario:
+                sg.popup("Por favor, selecione ou crie um usuário/comércio primeiro.",
+                         title="Erro", keep_on_top=True)
+                continue
             sg.popup("Mova o mouse para a posição de finalizar em 5 segundos...",
                      title="Calibração", keep_on_top=True)
             time.sleep(5)
@@ -915,11 +961,15 @@ if __name__ == "__main__":
                 f"X: {window.x_finalizar}, Y: {window.y_finalizar}")
             print(
                 f"Posição de finalizar calibrada: ({window.x_finalizar}, {window.y_finalizar})")
-            if usuario:
-                window.salvar_config_usuario(janela, usuario, values)
+            window.salvar_config_usuario(janela, usuario, values)
+            print(f"✅ Configuração salva para o usuário '{usuario}'")
 
         elif event == '-CALIBRAR_FECHAR-':
-            usuario = (values.get('-USUARIO') or "").strip()
+            usuario = (values.get('-USUARIO-') or "").strip()
+            if not usuario:
+                sg.popup("Por favor, selecione ou crie um usuário/comércio primeiro.",
+                         title="Erro", keep_on_top=True)
+                continue
             sg.popup("Mova o mouse para a posição de fechar em 5 segundos...",
                      title="Calibração", keep_on_top=True)
             time.sleep(5)
@@ -928,8 +978,8 @@ if __name__ == "__main__":
                 f"X: {window.x_fechar}, Y: {window.y_fechar}")
             print(
                 f"Posição de fechar calibrada: ({window.x_fechar}, {window.y_fechar})")
-            if usuario:
-                window.salvar_config_usuario(janela, usuario, values)
+            window.salvar_config_usuario(janela, usuario, values)
+            print(f"✅ Configuração salva para o usuário '{usuario}'")
 
         elif event == '-USAR_CLIQUE_PDV-':
             usuario = (values.get('-USUARIO-') or "").strip()
@@ -940,8 +990,17 @@ if __name__ == "__main__":
             if usuario:
                 window.salvar_config_usuario(janela, usuario, values)
 
+        elif event == '-USAR_CLIQUE_FECHAR-':
+            usuario = (values.get('-USUARIO-') or "").strip()
+            usar_clique_fechar = values['-USAR_CLIQUE_FECHAR-']
+            janela['-CALIBRAR_FECHAR-'].update(disabled=not usar_clique_fechar)
+            if not usar_clique_fechar:
+                janela['-POS_FECHAR-'].update("")
+            if usuario:
+                window.salvar_config_usuario(janela, usuario, values)
+
         elif event in ['-VALOR_MAX-', '-MARGEM-', '-PORC_ESTOQUE-', '-ESTOQUE_MIN-',
-                       '-TEMPO_INICIAL-', '-TEMPO-', '-CONFIRMAR-', '-QTD_MAX_ITEM-', '-QTD_MAX_POR_VEZ-']:
+                       '-TEMPO_INICIAL-', '-TEMPO-', '-CONFIRMAR-', '-QTD_MAX_ITEM-', '-QTD_MAX_POR_VEZ-', '-VENDER_UNIDADE_UNICA-']:
             usuario = (values.get('-USUARIO-') or "").strip()
             if usuario:
                 window.salvar_config_usuario(janela, usuario, values)
@@ -969,7 +1028,8 @@ if __name__ == "__main__":
                          title="Erro", keep_on_top=True)
                 continue
 
-            if window.x_fechar is None or window.y_fechar is None:
+            usar_clique_fechar = values.get('-USAR_CLIQUE_FECHAR-', True)
+            if usar_clique_fechar and (window.x_fechar is None or window.y_fechar is None):
                 sg.popup("Por favor, calibre a posição de fechar primeiro.",
                          title="Erro", keep_on_top=True)
                 continue
@@ -1001,7 +1061,10 @@ if __name__ == "__main__":
                     usuario=usuario if usuario else None,
                     quantidade_max_item=values.get('-QTD_MAX_ITEM-', '200'),
                     quantidade_max_por_vez=values.get(
-                        '-QTD_MAX_POR_VEZ-', '99')
+                        '-QTD_MAX_POR_VEZ-', '99'),
+                    vender_unidade_unica=values.get(
+                        '-VENDER_UNIDADE_UNICA-', False),
+                    usar_clique_fechar=usar_clique_fechar
                 )
                 auto.executar()
             except Exception as e:
